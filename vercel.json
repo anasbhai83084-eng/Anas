@@ -2,18 +2,6 @@
   "version": 2,
   "rewrites": [
     {
-      "source": "/api/zapupi/:path*",
-      "destination": "/api/zapupi/:path*.ts"
-    },
-    {
-      "source": "/api/cashfree/:path*",
-      "destination": "/api/cashfree/:path*.ts"
-    },
-    {
-      "source": "/api/upload-image",
-      "destination": "/api/upload-image.ts"
-    },
-    {
       "source": "/((?!api/).*)",
       "destination": "/"
     }
@@ -22,7 +10,7 @@
     "api/**/*.ts": {
       "memory": 1024,
       "maxDuration": 15,
-      "includeFiles": "firebase-applet-config.json"
+      "includeFiles": "{firebase-applet-config.json,lib/**,api/**}"
     }
   }
 }

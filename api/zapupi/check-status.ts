@@ -1,5 +1,88 @@
-import { getFirebaseAdmin } from "./lib/firebase-admin.js";
+import { getApps, initializeApp, getApp, cert } from "firebase-admin/app";
+import { getFirestore, FieldValue } from "firebase-admin/firestore";
+import fs from "fs";
+import path from "path";
 import axios from "axios";
+
+// Embedded default fallback config for serverless environments
+const DEFAULT_FIREBASE_CONFIG = {
+  projectId: "khel-galli-49b03",
+  appId: "1:975078214004:web:7eb2b340d559ed4ae34421",
+  apiKey: "AIzaSyCaMCsb7uh_O4JIhxp5ElxVRXf9KXYbQb8",
+  authDomain: "khel-galli-49b03.firebaseapp.com",
+  firestoreDatabaseId: "ai-studio-77efbb54-a595-4a00-a189-15e356a65ecc",
+  storageBucket: "khel-galli-49b03.firebasestorage.app",
+  messagingSenderId: "975078214004"
+};
+
+export function getFirebaseAdmin() {
+  let firebaseConfig: any = { ...DEFAULT_FIREBASE_CONFIG };
+
+  try {
+    const configPath = path.join(process.cwd(), "firebase-applet-config.json");
+    if (fs.existsSync(configPath)) {
+      const fileData = JSON.parse(fs.readFileSync(configPath, "utf8"));
+      firebaseConfig = { ...firebaseConfig, ...fileData };
+    }
+  } catch (e) {
+    // Ignore file read error in serverless environments
+  }
+
+  const serviceAccountKey = process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
+  const projectId = 
+    process.env.GOOGLE_CLOUD_PROJECT || 
+    process.env.FIREBASE_PROJECT_ID || 
+    firebaseConfig.projectId || 
+    "khel-galli-49b03";
+
+  const databaseId = 
+    process.env.FIRESTORE_DATABASE_ID || 
+    firebaseConfig.firestoreDatabaseId || 
+    "ai-studio-77efbb54-a595-4a00-a189-15e356a65ecc";
+
+  // Initialize App
+  let app: any;
+  if (getApps().length === 0) {
+    try {
+      if (serviceAccountKey) {
+        let parsedKey = serviceAccountKey;
+        if (typeof serviceAccountKey === "string" && (serviceAccountKey.startsWith("{") || serviceAccountKey.startsWith("["))) {
+          parsedKey = JSON.parse(serviceAccountKey);
+        }
+        app = initializeApp({
+          credential: cert(parsedKey),
+          projectId: projectId
+        });
+      } else {
+        app = initializeApp({
+          projectId: projectId
+        });
+      }
+    } catch (error: any) {
+      try {
+        app = initializeApp({ projectId: projectId });
+      } catch (e2: any) {
+        app = getApps()[0] || null;
+      }
+    }
+  } else {
+    app = getApp();
+  }
+
+  // Initialize Firestore
+  let db: any;
+  try {
+    db = getFirestore(app, databaseId);
+  } catch (err) {
+    try {
+      db = getFirestore(app);
+    } catch (e3) {
+      console.error("[Firebase Admin] Firestore init failed:", e3);
+    }
+  }
+  
+  return { app, db, databaseId, FieldValue };
+}
 
 export default async function handler(req: any, res: any) {
   // CORS support
@@ -22,11 +105,11 @@ export default async function handler(req: any, res: any) {
   console.log("[ZapUPI Status Check] Route hit");
 
   let db: any = null;
-  let FieldValue: any = null;
+  let FieldValueObj: any = null;
   try {
     const admin = getFirebaseAdmin();
     db = admin.db;
-    FieldValue = admin.FieldValue;
+    FieldValueObj = admin.FieldValue;
   } catch (adminErr: any) {
     console.warn("[ZapUPI Status Check] Firebase Admin init notice:", adminErr?.message);
   }
@@ -119,7 +202,7 @@ export default async function handler(req: any, res: any) {
     }
 
     // 4. Update Wallet if success
-    if (finalStatus === 'success' && verifiedData && db && transRef && userId && FieldValue) {
+    if (finalStatus === 'success' && verifiedData && db && transRef && userId && FieldValueObj) {
       console.log(`[ZapUPI Status Check] Payment verified. Processing wallet credit for ${userId}`);
       
       const gatewayAmount = Number(verifiedData.amount || verifiedData.order_amount || verifiedData.pay_amount || originalAmount || 0);
@@ -137,12 +220,12 @@ export default async function handler(req: any, res: any) {
           amount: gatewayAmount,
           paymentId: txId,
           utr: utr,
-          updatedAt: FieldValue.serverTimestamp()
+          updatedAt: FieldValueObj.serverTimestamp()
         });
 
         t.update(userRef, {
-          'wallet.deposit': FieldValue.increment(gatewayAmount),
-          'stats.totalDeposited': FieldValue.increment(gatewayAmount)
+          'wallet.deposit': FieldValueObj.increment(gatewayAmount),
+          'stats.totalDeposited': FieldValueObj.increment(gatewayAmount)
         });
       });
 
@@ -150,8 +233,8 @@ export default async function handler(req: any, res: any) {
       return res.json({ success: true, status: 'success', detail: verifiedData });
     }
 
-    if (finalStatus === 'failed' && db && transRef && FieldValue) {
-       await transRef.update({ status: 'failed', updatedAt: FieldValue.serverTimestamp() });
+    if (finalStatus === 'failed' && db && transRef && FieldValueObj) {
+       await transRef.update({ status: 'failed', updatedAt: FieldValueObj.serverTimestamp() });
        return res.json({ success: false, status: 'failed', detail: verifiedData });
     }
 
